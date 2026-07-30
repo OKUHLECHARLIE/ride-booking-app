@@ -34,6 +34,22 @@ app.get('/api/rides', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+app.patch('/api/rides/:id', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const ride = await Ride.findByIdAndUpdate(
+      req.params.id,
+      { status },
+      { new: true, runValidators: true }
+    );
+    if (!ride) {
+      return res.status(404).json({ error: 'Ride not found' });
+    }
+    res.json(ride);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
 app.listen(3000, () => {
   console.log('Server running on http://localhost:3000');
 });

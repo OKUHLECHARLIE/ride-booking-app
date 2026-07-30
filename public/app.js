@@ -75,15 +75,72 @@ function addRideToList(ride) {
   `;
   ridesList.prepend(li);
 }
-requestBtn.addEventListener('click', function () {
-  // Only proceed if both markers have been placed
+function addRideToMap(ride) {
+  // Draw a teal circle at the pickup location
+  L.circleMarker([ride.pickup.lat, ride.pickup.lng], {
+    radius: 8,
+    color: '#00d4aa',
+    fillColor: '#00d4aa',
+    fillOpacity: 0.7
+  }).addTo(map).bindPopup('Pickup (Ride ' + ride._id.slice(-4) + ')');
+
+  // Draw a red circle at the dropoff location
+  L.circleMarker([ride.dropoff.lat, ride.dropoff.lng], {
+    radius: 8,
+    color: '#e74c3c',
+    fillColor: '#e74c3c',
+    fillOpacity: 0.7
+  }).addTo(map).bindPopup('Dropoff (Ride ' + ride._id.slice(-4) + ')');
+
+  // Connect pickup and dropoff with a purple dashed line
+  L.polyline([
+    [ride.pickup.lat, ride.pickup.lng],
+    [ride.dropoff.lat, ride.dropoff.lng]
+  ], { color: '#7c3aed', weight: 2, dashArray: '5, 10' }).addTo(map);
+}
+requestBtn.addEventListener('click', async function () {
   if (!pickupMarker || !dropoffMarker) return;
-  // Build a ride object from the marker coordinates
+
+  // Build the ride data from marker positions
   const rideData = {
-    pickup: { lat: pickupMarker.getLatLng().lat, lng: pickupMarker.getLatLng().lng },
-    dropoff: { lat: dropoffMarker.getLatLng().lat, lng: dropoffMarker.getLatLng().lng },
-    status: 'pending'
+    pickup: {
+      lat: pickupMarker.getLatLng().lat,
+      lng: pickupMarker.getLatLng().lng
+    },
+    dropoff: {
+      lat: dropoffMarker.getLatLng().lat,
+      lng: dropoffMarker.getLatLng().lng
+    }
   };
-  addRideToList(rideData);
-  resetMarkers();
+
+  // Send the ride to the server
+  try {
+    const response = await fetch('/api/rides', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rideData)
+    });
+    const savedRide = await response.json();
+    addRideToList(savedRide);
+    addRideToMap(savedRide);
+    resetMarkers();
+  } catch (err) {
+    console.error('Error requesting ride:', err);
+  }
 });
+// Fetch all rides from the database and display them
+async function loadRides() {
+  try {
+    const response = await fetch('/api/rides');
+    const rides = await response.json();
+    rides.forEach(ride => {
+      addRideToList(ride);
+      addRideToMap(ride);
+    });
+  } catch (err) {
+    console.error('Error loading rides:', err);
+  }
+}
+
+// Load rides as soon as the page opens
+loadRides();
