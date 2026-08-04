@@ -2,7 +2,11 @@ const driverRides = document.getElementById('driver-rides');
 
 async function loadPendingRides() {
   try {
-    const response = await fetch('/api/rides');
+    const response = await fetch('/api/rides', { credentials: 'include' });
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
     const rides = await response.json();
     const activeRides = rides.filter(r => r.status !== 'completed');
     if (activeRides.length === 0) {
@@ -30,15 +34,42 @@ async function loadPendingRides() {
 }
 async function updateRide(id, status) {
   try {
-    await fetch(`/api/rides/${id}`, {
+    const response = await fetch(`/api/rides/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ status })
     });
+
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
     loadPendingRides();
   } catch (err) {
     console.error('Error updating ride:', err);
   }
+}
+
+const logoutBtn = document.getElementById('logout-btn');
+
+async function logout() {
+  try {
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      window.location.href = '/login.html';
+    }
+  } catch (err) {
+    console.error('Error logging out:', err);
+  }
+}
+
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', logout);
 }
 
 loadPendingRides();

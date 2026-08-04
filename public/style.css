@@ -64,6 +64,16 @@ button {
   font-weight: 600;
 }
 
+#logout-btn {
+  background: #00d4aa;
+  color: #1a1a2e;
+  margin-bottom: 12px;
+  width: 100%;
+}
+
+#logout-btn:hover {
+  background: #00b894;
+}
 
 #request-btn {
   background: #00d4aa;

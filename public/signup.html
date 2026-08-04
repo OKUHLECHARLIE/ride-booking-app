@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RideBook - Sign Up</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      min-height: 100vh;
+      overflow: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: #1a1a2e;
+      color: #ffffff;
+    }
+
+    .auth-shell {
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .auth-card {
+      background: #16213e;
+      padding: 28px 24px;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .auth-card h1 {
+      color: #00d4aa;
+      font-size: 1.5rem;
+      margin-bottom: 8px;
+    }
+
+    .auth-card p {
+      color: #aaaaaa;
+      margin-bottom: 18px;
+      line-height: 1.5;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .form-group label {
+      color: #cccccc;
+      font-size: 0.9rem;
+    }
+
+    .form-group input,
+    .form-group select {
+      padding: 10px 12px;
+      border: 1px solid #444466;
+      border-radius: 6px;
+      background: #1a1a2e;
+      color: #ffffff;
+      font-size: 0.95rem;
+    }
+
+    .password-wrapper {
+      position: relative;
+    }
+
+    .password-wrapper input {
+      width: 100%;
+      padding-right: 42px;
+    }
+
+    .password-toggle {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      color: #cccccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .password-toggle svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .auth-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .auth-btn-primary {
+      background: #00d4aa;
+      color: #1a1a2e;
+      width: 100%;
+    }
+
+    .auth-btn-secondary {
+      background: #444466;
+      color: #ffffff;
+      width: 100%;
+    }
+
+    .auth-link {
+      margin-top: 16px;
+      text-align: center;
+    }
+
+    .auth-link a {
+      color: #00d4aa;
+      text-decoration: none;
+    }
+
+    .auth-message {
+      margin-top: 12px;
+      font-size: 0.9rem;
+      min-height: 1.2rem;
+      color: #ff7f7f;
+    }
+  </style>
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <h1>Create an account</h1>
+      <p>Choose your role and start booking or driving rides.</p>
+      <form id="signup-form">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <div class="password-wrapper">
+            <input id="password" name="password" type="password" required autocomplete="new-password">
+            <button type="button" class="password-toggle" data-target="password" aria-label="Show password">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="role">Role</label>
+          <select id="role" name="role">
+            <option value="rider">Rider</option>
+            <option value="driver">Driver</option>
+          </select>
+        </div>
+        <div class="auth-actions">
+          <button class="auth-btn-primary" type="submit">Sign up</button>
+          <button class="auth-btn-secondary" type="button" onclick="window.location.href='/login.html'">Back to Login</button>
+        </div>
+      </form>
+      <p id="message" class="auth-message"></p>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('signup-form');
+    const message = document.getElementById('message');
+
+    document.querySelectorAll('.password-toggle').forEach((button) => {
+      button.addEventListener('click', () => {
+        const input = document.getElementById(button.dataset.target);
+        const isPassword = input.type === 'password';
+
+        input.type = isPassword ? 'text' : 'password';
+        button.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+
+        button.innerHTML = isPassword
+          ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4"></path><path d="M9.4 4.8A10.9 10.9 0 0 1 12 4c6.5 0 10 8 10 8a18.3 18.3 0 0 1-4.2 5.1"></path><path d="M6.5 6.5A18.2 18.2 0 0 0 2 12s3.5 7 10 7a11.7 11.7 0 0 0 5.5-1.4"></path></svg>'
+          : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+      });
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      message.textContent = '';
+
+      const username = form.username.value.trim();
+      const password = form.password.value.trim();
+      const role = form.role.value;
+
+      if (!username || !password || !role) {
+        message.textContent = 'Please complete all fields.';
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ username, password, role })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Signup failed');
+        }
+
+        if (data.role === 'driver') {
+          window.location.href = '/driver.html';
+        } else {
+          window.location.href = '/index.html';
+        }
+      } catch (err) {
+        message.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

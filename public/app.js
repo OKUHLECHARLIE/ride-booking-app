@@ -18,6 +18,26 @@ const rideControls = document.getElementById('ride-controls');
 const requestBtn = document.getElementById('request-btn');
 const resetBtn = document.getElementById('reset-btn');
 const ridesList = document.getElementById('rides-list');
+const logoutBtn = document.getElementById('logout-btn');
+
+async function logout() {
+  try {
+    const response = await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      window.location.href = '/login.html';
+    }
+  } catch (err) {
+    console.error('Error logging out:', err);
+  }
+}
+
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', logout);
+}
 // Define a green icon for pickup markers
 const greenIcon = L.icon({
   iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
@@ -118,8 +138,14 @@ requestBtn.addEventListener('click', async function () {
     const response = await fetch('/api/rides', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(rideData)
     });
+
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
     const savedRide = await response.json();
     addRideToList(savedRide);
     addRideToMap(savedRide);
@@ -131,7 +157,11 @@ requestBtn.addEventListener('click', async function () {
 // Fetch all rides from the database and display them
 async function loadRides() {
   try {
-    const response = await fetch('/api/rides');
+    const response = await fetch('/api/rides', { credentials: 'include' });
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
     const rides = await response.json();
     rides.forEach(ride => {
       addRideToList(ride);

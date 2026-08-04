@@ -9,6 +9,11 @@ const rideSchema = new mongoose.Schema({
     lat: { type: Number, required: true },
     lng: { type: Number, required: true }
   },
+  riderId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   status: {
     type: String,
     enum: ['pending', 'accepted', 'completed'],
