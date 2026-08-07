@@ -43,6 +43,23 @@ function formatLocationLabel(point) {
   return '';
 }
 
+async function geocodeRide(ride) {
+  const [pickupAddress, dropoffAddress] = await Promise.all([
+    fetchAddress(ride.pickup.lat, ride.pickup.lng).catch(err => {
+      console.error('Error geocoding pickup:', err);
+      return `${ride.pickup.lat.toFixed(4)}, ${ride.pickup.lng.toFixed(4)}`;
+    }),
+    fetchAddress(ride.dropoff.lat, ride.dropoff.lng).catch(err => {
+      console.error('Error geocoding dropoff:', err);
+      return `${ride.dropoff.lat.toFixed(4)}, ${ride.dropoff.lng.toFixed(4)}`;
+    })
+  ]);
+
+  ride.pickup.address = pickupAddress;
+  ride.dropoff.address = dropoffAddress;
+  return ride;
+}
+
 async function logout() {
   try {
     const response = await fetch('/api/auth/logout', {
@@ -221,7 +238,8 @@ async function loadRides() {
       return;
     }
     const rides = await response.json();
-    rides.forEach(ride => {
+    const geocodedRides = await Promise.all(rides.map(ride => geocodeRide(ride)));
+    geocodedRides.forEach(ride => {
       addRideToList(ride);
       addRideToMap(ride);
     });
