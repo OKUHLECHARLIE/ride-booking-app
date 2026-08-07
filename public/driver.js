@@ -1,5 +1,21 @@
 const driverRides = document.getElementById('driver-rides');
 
+async function fetchAddress(lat, lng) {
+  try {
+    const response = await fetch(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, {
+      credentials: 'include'
+    });
+    if (!response.ok) {
+      throw new Error('Geocode request failed');
+    }
+    const data = await response.json();
+    return data.address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  } catch (err) {
+    console.error('Error fetching address:', err);
+    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  }
+}
+
 async function loadPendingRides() {
   try {
     const response = await fetch('/api/rides', { credentials: 'include' });
@@ -14,20 +30,33 @@ async function loadPendingRides() {
       return;
     }
     driverRides.innerHTML = '';
-    activeRides.forEach(ride => {
+    const pendingRenderPromises = activeRides.map(async ride => {
       const card = document.createElement('div');
       card.className = 'ride-card';
       card.innerHTML = `
         <div class="coords">
-          <strong>Pickup:</strong> ${ride.pickup.lat.toFixed(4)}, ${ride.pickup.lng.toFixed(4)}<br>
-          <strong>Dropoff:</strong> ${ride.dropoff.lat.toFixed(4)}, ${ride.dropoff.lng.toFixed(4)}
+          <strong>Pickup:</strong> Loading address...<br>
+          <strong>Dropoff:</strong> Loading address...
         </div>
         <span class="status ${ride.status}">${ride.status}</span>
         ${ride.status === 'pending' ? `<button class="accept-btn" onclick="updateRide('${ride._id}', 'accepted')">Accept</button>` : ''}
         ${ride.status === 'accepted' ? `<button class="complete-btn" onclick="updateRide('${ride._id}', 'completed')">Complete</button>` : ''}
       `;
       driverRides.appendChild(card);
+
+      const coordsDiv = card.querySelector('.coords');
+      const [pickupAddress, dropoffAddress] = await Promise.all([
+        fetchAddress(ride.pickup.lat, ride.pickup.lng),
+        fetchAddress(ride.dropoff.lat, ride.dropoff.lng)
+      ]);
+
+      coordsDiv.innerHTML = `
+        <strong>Pickup:</strong> ${pickupAddress}<br>
+        <strong>Dropoff:</strong> ${dropoffAddress}
+      `;
     });
+
+    await Promise.all(pendingRenderPromises);
   } catch (err) {
     console.error('Error loading rides:', err);
   }
