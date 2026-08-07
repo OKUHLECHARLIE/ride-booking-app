@@ -20,6 +20,29 @@ const resetBtn = document.getElementById('reset-btn');
 const ridesList = document.getElementById('rides-list');
 const logoutBtn = document.getElementById('logout-btn');
 
+async function fetchAddress(lat, lng) {
+  const response = await fetch(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, {
+    credentials: 'include'
+  });
+
+  if (!response.ok) {
+    throw new Error('Reverse geocode request failed');
+  }
+
+  const data = await response.json();
+  return data.address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+}
+
+function formatLocationLabel(point) {
+  if (point?.address) {
+    return point.address;
+  }
+  if (typeof point?.lat === 'number' && typeof point?.lng === 'number') {
+    return `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
+  }
+  return '';
+}
+
 async function logout() {
   try {
     const response = await fetch('/api/auth/logout', {
@@ -61,15 +84,43 @@ const redIcon = L.icon({
 map.on('click', function (e) {
   if (clickState === 'pickup') {
     if (pickupMarker) map.removeLayer(pickupMarker);
-    pickupMarker = L.marker(e.latlng, { icon: greenIcon }).addTo(map).bindPopup('Pickup').openPopup();
+    pickupMarker = L.marker(e.latlng, { icon: greenIcon }).addTo(map).bindPopup('Pickup: Looking up address...').openPopup();
     clickState = 'dropoff';
-    instruction.textContent = 'Now click to set your dropoff location';
+    instruction.textContent = 'Looking up address...';
+
+    fetchAddress(e.latlng.lat, e.latlng.lng)
+      .then(address => {
+        pickupMarker.address = address;
+        pickupMarker.setPopupContent(`Pickup: ${address}`).openPopup();
+        instruction.textContent = 'Now click to set your dropoff location';
+      })
+      .catch(err => {
+        const fallback = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+        pickupMarker.address = fallback;
+        pickupMarker.setPopupContent(`Pickup: ${fallback}`).openPopup();
+        instruction.textContent = 'Now click to set your dropoff location';
+        console.error('Error fetching pickup address:', err);
+      });
   } else if (clickState === 'dropoff') {
     if (dropoffMarker) map.removeLayer(dropoffMarker);
-    dropoffMarker = L.marker(e.latlng, { icon: redIcon }).addTo(map).bindPopup('Dropoff').openPopup();
+    dropoffMarker = L.marker(e.latlng, { icon: redIcon }).addTo(map).bindPopup('Dropoff: Looking up address...').openPopup();
     clickState = 'done';
-    instruction.textContent = 'Ready! Click "Request Ride" to submit.';
+    instruction.textContent = 'Looking up address...';
     rideControls.classList.remove('hidden');
+
+    fetchAddress(e.latlng.lat, e.latlng.lng)
+      .then(address => {
+        dropoffMarker.address = address;
+        dropoffMarker.setPopupContent(`Dropoff: ${address}`).openPopup();
+        instruction.textContent = 'Ready! Click "Request Ride" to submit.';
+      })
+      .catch(err => {
+        const fallback = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+        dropoffMarker.address = fallback;
+        dropoffMarker.setPopupContent(`Dropoff: ${fallback}`).openPopup();
+        instruction.textContent = 'Ready! Click "Request Ride" to submit.';
+        console.error('Error fetching dropoff address:', err);
+      });
   }
 });
 // Remove both markers and reset state
@@ -86,12 +137,14 @@ function resetMarkers() {
 resetBtn.addEventListener('click', resetMarkers);
 
 function addRideToList(ride) {
-  // Create a list item showing the ride's status and coordinates
+  const pickupLabel = formatLocationLabel(ride.pickup);
+  const dropoffLabel = formatLocationLabel(ride.dropoff);
+
   const li = document.createElement('li');
   li.innerHTML = `
     <span class="status ${ride.status}">${ride.status}</span>
-    Pickup: ${ride.pickup.lat.toFixed(4)}, ${ride.pickup.lng.toFixed(4)}<br>
-    Dropoff: ${ride.dropoff.lat.toFixed(4)}, ${ride.dropoff.lng.toFixed(4)}
+    Pickup: ${pickupLabel}<br>
+    Dropoff: ${dropoffLabel}
   `;
   ridesList.prepend(li);
 }
@@ -147,7 +200,12 @@ requestBtn.addEventListener('click', async function () {
       return;
     }
     const savedRide = await response.json();
-    addRideToList(savedRide);
+    const displayRide = {
+      ...savedRide,
+      pickup: { ...savedRide.pickup, address: pickupMarker?.address },
+      dropoff: { ...savedRide.dropoff, address: dropoffMarker?.address }
+    };
+    addRideToList(displayRide);
     addRideToMap(savedRide);
     resetMarkers();
   } catch (err) {

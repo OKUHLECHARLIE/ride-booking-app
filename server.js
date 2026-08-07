@@ -3,6 +3,10 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
+require('dotenv').config();
 const Ride = require('./models/Ride');
 const User = require('./models/User');
 
@@ -49,6 +53,74 @@ const requireRole = role => (req, res, next) => {
 };
 
 app.use(express.static('public'));
+
+const locationsCachePath = path.join(__dirname, 'locations.json');
+
+async function fetchJson(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers }, (response) => {
+      let responseBody = '';
+      response.on('data', (chunk) => { responseBody += chunk; });
+      response.on('end', () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          return reject(new Error(`Reverse geocoding returned status ${response.statusCode}`));
+        }
+        try {
+          resolve(JSON.parse(responseBody));
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }).on('error', reject);
+  });
+}
+
+app.get('/api/geocode', async (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+
+  if (Number.isNaN(lat) || Number.isNaN(lng)) {
+    return res.status(400).json({ error: 'lat and lng query parameters are required' });
+  }
+
+  const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+  let cacheData = {};
+
+  try {
+    const fileContents = await fs.promises.readFile(locationsCachePath, 'utf8');
+    cacheData = JSON.parse(fileContents || '{}');
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error('Error reading locations cache:', err);
+      return res.status(500).json({ error: 'Could not read location cache' });
+    }
+  }
+
+  if (cacheData[cacheKey]) {
+    return res.json({ address: cacheData[cacheKey] });
+  }
+
+  try {
+    // Nominatim usage policy recommends at most 1 request per second for small apps.
+    // This app is small, so a comment safeguard is sufficient rather than a queue.
+    const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}`;
+    const apiResponse = await fetchJson(nominatimUrl, {
+      'User-Agent': 'RideBookingApp/1.0 (contact: charlieokuhle4@gmail.com)'
+    });
+
+    const address = apiResponse?.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+    if (address && address !== `${lat.toFixed(4)}, ${lng.toFixed(4)}`) {
+      cacheData[cacheKey] = address;
+      await fs.promises.writeFile(locationsCachePath, JSON.stringify(cacheData, null, 2), 'utf8');
+    }
+
+    res.json({ address });
+  } catch (err) {
+    console.error('Reverse geocode error:', err);
+    res.json({ address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` });
+  }
+});
 
 const MONGODB_URI = 'mongodb+srv://OkuhleCharlie:Lukhanyo@ridecluster.zgmjizs.mongodb.net/?retryWrites=true&w=majority&appName=RideCluster';
 
