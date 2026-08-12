@@ -108,9 +108,15 @@ app.get('/api/geocode', async (req, res) => {
       'User-Agent': 'RideBookingApp/1.0 (contact: charlieokuhle4@gmail.com)'
     });
 
-    const address = apiResponse?.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    const fallbackAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    const structuredAddress = apiResponse?.address || {};
+    const street = structuredAddress.road || structuredAddress.pedestrian || structuredAddress.footway;
+    const suburb = structuredAddress.suburb || structuredAddress.neighbourhood;
+    const city = structuredAddress.city || structuredAddress.town || structuredAddress.village;
+    const addressParts = [street, suburb, city].filter(Boolean);
+    const address = addressParts.length ? addressParts.join(', ') : fallbackAddress;
 
-    if (address && address !== `${lat.toFixed(4)}, ${lng.toFixed(4)}`) {
+    if (address && address !== fallbackAddress) {
       cacheData[cacheKey] = address;
       await fs.promises.writeFile(locationsCachePath, JSON.stringify(cacheData, null, 2), 'utf8');
     }
