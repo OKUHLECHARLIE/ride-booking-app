@@ -193,6 +193,33 @@ app.get('/api/route', async (req, res) => {
   }
 });
 
+app.get('/api/search', async (req, res) => {
+  const query = String(req.query.q || '').trim();
+
+  if (!query) {
+    return res.json([]);
+  }
+
+  const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
+
+  try {
+    const results = await fetchJson(searchUrl, {
+      'User-Agent': 'RideBookingApp/1.0 (contact: charlieokuhle4@gmail.com)'
+    });
+
+    const normalizedResults = (Array.isArray(results) ? results : []).map(result => ({
+      displayName: result?.display_name || `${result?.lat || 0}, ${result?.lon || 0}`,
+      lat: parseFloat(result?.lat),
+      lng: parseFloat(result?.lon)
+    })).filter(result => !Number.isNaN(result.lat) && !Number.isNaN(result.lng));
+
+    res.json(normalizedResults);
+  } catch (err) {
+    console.error('Search geocoding error:', err);
+    res.json([]);
+  }
+});
+
 const MONGODB_URI = 'mongodb+srv://OkuhleCharlie:Lukhanyo@ridecluster.zgmjizs.mongodb.net/?retryWrites=true&w=majority&appName=RideCluster';
 
 mongoose.connect(MONGODB_URI)
@@ -285,6 +312,29 @@ app.post('/api/rides', requireAuth, requireRole('rider'), async (req, res) => {
     res.status(201).json(savedRide);
   } 
   catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/rides/:id', requireAuth, requireRole('rider'), async (req, res) => {
+  try {
+    const ride = await Ride.findById(req.params.id);
+
+    if (!ride) {
+      return res.status(404).json({ error: 'Ride not found' });
+    }
+
+    if (ride.riderId.toString() !== req.session.userId.toString()) {
+      return res.status(403).json({ error: 'You can only delete your own completed rides' });
+    }
+
+    if (ride.status !== 'completed') {
+      return res.status(400).json({ error: 'Only completed rides can be deleted' });
+    }
+
+    await Ride.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Ride deleted successfully' });
+  } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });

@@ -14,6 +14,14 @@
     <div id="sidebar">
       <button id="logout-btn" type="button">Logout</button>
       <h1>RideBook</h1>
+      <div class="search-container">
+        <label for="location-search" class="search-label">Search location</label>
+        <div class="search-row">
+          <input id="location-search" type="text" placeholder="Search pickup or dropoff" />
+          <button id="search-btn" type="button">Search</button>
+        </div>
+        <ul id="search-results" class="search-results hidden"></ul>
+      </div>
       <p class="instruction" id="instruction">Click the map to set your pickup location</p>
       <div id="ride-controls" class="hidden">
         <button id="request-btn">Request Ride</button>

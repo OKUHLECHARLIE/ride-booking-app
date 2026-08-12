@@ -1,5 +1,5 @@
-// Initialize the Leaflet map centered on London
-const map = L.map('map').setView([51.505, -0.09], 13);
+// Initialize the Leaflet map centered on Cape Town
+const map = L.map('map').setView([-33.9249, 18.4241], 13);
 
 // Add OpenStreetMap tiles as the base layer
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -20,6 +20,26 @@ const requestBtn = document.getElementById('request-btn');
 const resetBtn = document.getElementById('reset-btn');
 const ridesList = document.getElementById('rides-list');
 const logoutBtn = document.getElementById('logout-btn');
+const searchInput = document.getElementById('location-search');
+const searchBtn = document.getElementById('search-btn');
+const searchResults = document.getElementById('search-results');
+const rideLayersById = new Map();
+let searchTimeout = null;
+
+function removeRideFromMap(rideId) {
+  const layers = rideLayersById.get(rideId);
+  if (!layers) {
+    return;
+  }
+
+  layers.forEach(layer => {
+    if (layer && map.hasLayer(layer)) {
+      map.removeLayer(layer);
+    }
+  });
+
+  rideLayersById.delete(rideId);
+}
 
 async function fetchAddress(lat, lng) {
   const response = await fetch(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, {
@@ -148,6 +168,112 @@ async function logout() {
 if (logoutBtn) {
   logoutBtn.addEventListener('click', logout);
 }
+
+function clearSearchResults() {
+  if (searchResults) {
+    searchResults.innerHTML = '';
+    searchResults.classList.add('hidden');
+  }
+}
+
+function setMarkerAtLocation({ lat, lng, address, icon, label }) {
+  const marker = L.marker([lat, lng], { icon }).addTo(map).bindPopup(`${label}: Looking up address...`).openPopup();
+  marker.address = address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  marker.setPopupContent(`${label}: ${marker.address}`).openPopup();
+
+  if (label === 'Pickup') {
+    if (pickupMarker) map.removeLayer(pickupMarker);
+    pickupMarker = marker;
+    clickState = 'dropoff';
+    instruction.textContent = 'Now click to set your dropoff location';
+  } else {
+    if (dropoffMarker) map.removeLayer(dropoffMarker);
+    dropoffMarker = marker;
+    clickState = 'done';
+    rideControls.classList.remove('hidden');
+    const pickupLatLng = pickupMarker.getLatLng();
+    const dropoffLatLng = dropoffMarker.getLatLng();
+    drawRouteBetweenPoints(pickupLatLng.lat, pickupLatLng.lng, dropoffLatLng.lat, dropoffLatLng.lng, { showDistance: true });
+  }
+}
+
+async function searchLocations(query) {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    clearSearchResults();
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`, { credentials: 'include' });
+    if (!response.ok) {
+      throw new Error('Search request failed');
+    }
+
+    const results = await response.json();
+    if (!searchResults) {
+      return;
+    }
+
+    searchResults.innerHTML = '';
+    if (!results.length) {
+      searchResults.innerHTML = '<li>No results found.</li>';
+      searchResults.classList.remove('hidden');
+      return;
+    }
+
+    results.forEach(result => {
+      const item = document.createElement('li');
+      item.textContent = result.displayName;
+      item.addEventListener('click', () => {
+        clearSearchResults();
+        searchInput.value = result.displayName;
+
+        if (clickState === 'pickup') {
+          setMarkerAtLocation({
+            lat: Number(result.lat),
+            lng: Number(result.lng),
+            address: result.displayName,
+            icon: greenIcon,
+            label: 'Pickup'
+          });
+          return;
+        }
+
+        setMarkerAtLocation({
+          lat: Number(result.lat),
+          lng: Number(result.lng),
+          address: result.displayName,
+          icon: redIcon,
+          label: 'Dropoff'
+        });
+      });
+      searchResults.appendChild(item);
+    });
+    searchResults.classList.remove('hidden');
+  } catch (err) {
+    console.error('Error searching location:', err);
+    if (searchResults) {
+      searchResults.innerHTML = '<li>No results found.</li>';
+      searchResults.classList.remove('hidden');
+    }
+  }
+}
+
+if (searchInput) {
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      searchLocations(searchInput.value);
+    }, 400);
+  });
+}
+
+if (searchBtn) {
+  searchBtn.addEventListener('click', () => {
+    searchLocations(searchInput.value);
+  });
+}
 // Define a green icon for pickup markers
 const greenIcon = L.icon({
   iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
@@ -169,7 +295,9 @@ const redIcon = L.icon({
 });
 // Handle map clicks to place pickup and dropoff markers
 map.on('click', function (e) {
+  clearSearchResults();
   if (clickState === 'pickup') {
+    const pickupAddress = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
     if (pickupMarker) map.removeLayer(pickupMarker);
     pickupMarker = L.marker(e.latlng, { icon: greenIcon }).addTo(map).bindPopup('Pickup: Looking up address...').openPopup();
     clickState = 'dropoff';
@@ -182,13 +310,13 @@ map.on('click', function (e) {
         instruction.textContent = 'Now click to set your dropoff location';
       })
       .catch(err => {
-        const fallback = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
-        pickupMarker.address = fallback;
-        pickupMarker.setPopupContent(`Pickup: ${fallback}`).openPopup();
+        pickupMarker.address = pickupAddress;
+        pickupMarker.setPopupContent(`Pickup: ${pickupAddress}`).openPopup();
         instruction.textContent = 'Now click to set your dropoff location';
         console.error('Error fetching pickup address:', err);
       });
   } else if (clickState === 'dropoff') {
+    const dropoffAddress = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
     if (dropoffMarker) map.removeLayer(dropoffMarker);
     dropoffMarker = L.marker(e.latlng, { icon: redIcon }).addTo(map).bindPopup('Dropoff: Looking up address...').openPopup();
     clickState = 'done';
@@ -204,9 +332,8 @@ map.on('click', function (e) {
         return drawRouteBetweenPoints(pickupLatLng.lat, pickupLatLng.lng, dropoffLatLng.lat, dropoffLatLng.lng, { showDistance: true });
       })
       .catch(err => {
-        const fallback = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
-        dropoffMarker.address = fallback;
-        dropoffMarker.setPopupContent(`Dropoff: ${fallback}`).openPopup();
+        dropoffMarker.address = dropoffAddress;
+        dropoffMarker.setPopupContent(`Dropoff: ${dropoffAddress}`).openPopup();
         const pickupLatLng = pickupMarker.getLatLng();
         const dropoffLatLng = dropoffMarker.getLatLng();
         drawRouteBetweenPoints(pickupLatLng.lat, pickupLatLng.lng, dropoffLatLng.lat, dropoffLatLng.lng, { showDistance: true });
@@ -219,6 +346,10 @@ function resetMarkers() {
   if (pickupMarker) map.removeLayer(pickupMarker);
   if (dropoffMarker) map.removeLayer(dropoffMarker);
   clearCurrentRouteLine();
+  clearSearchResults();
+  if (searchInput) {
+    searchInput.value = '';
+  }
   pickupMarker = null;
   dropoffMarker = null;
   clickState = 'pickup';
@@ -242,41 +373,86 @@ function addRideToList(ride) {
     Distance: ${distanceLabel}<br>
     Price: ${priceLabel}
   `;
+
+  if (ride.status === 'completed') {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async () => {
+      const shouldDelete = window.confirm('Delete this completed ride?');
+      if (!shouldDelete) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/rides/${ride._id}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+
+        if (response.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Could not delete ride');
+        }
+
+        li.remove();
+        removeRideFromMap(ride._id);
+      } catch (err) {
+        console.error('Error deleting ride:', err);
+      }
+    });
+    li.appendChild(deleteBtn);
+  }
+
   ridesList.prepend(li);
 }
 async function addRideToMap(ride) {
-  // Draw a teal circle at the pickup location
-  L.circleMarker([ride.pickup.lat, ride.pickup.lng], {
+  removeRideFromMap(ride._id);
+
+  const rideLayers = [];
+
+  const pickupLayer = L.circleMarker([ride.pickup.lat, ride.pickup.lng], {
     radius: 8,
     color: '#00d4aa',
     fillColor: '#00d4aa',
     fillOpacity: 0.7
   }).addTo(map).bindPopup('Pickup (Ride ' + ride._id.slice(-4) + ')');
+  rideLayers.push(pickupLayer);
 
-  // Draw a red circle at the dropoff location
-  L.circleMarker([ride.dropoff.lat, ride.dropoff.lng], {
+  const dropoffLayer = L.circleMarker([ride.dropoff.lat, ride.dropoff.lng], {
     radius: 8,
     color: '#e74c3c',
     fillColor: '#e74c3c',
     fillOpacity: 0.7
   }).addTo(map).bindPopup('Dropoff (Ride ' + ride._id.slice(-4) + ')');
+  rideLayers.push(dropoffLayer);
 
   try {
     const routeData = await fetchRouteData(ride.pickup.lat, ride.pickup.lng, ride.dropoff.lat, ride.dropoff.lng);
     const routeCoordinates = Array.isArray(routeData?.route) ? routeData.route.map(([lng, lat]) => [lat, lng]) : null;
 
     if (routeCoordinates && routeCoordinates.length > 0) {
-      L.polyline(routeCoordinates, { color: '#7c3aed', weight: 4 }).addTo(map);
+      const routeLayer = L.polyline(routeCoordinates, { color: '#7c3aed', weight: 4 }).addTo(map);
+      rideLayers.push(routeLayer);
+      rideLayersById.set(ride._id, rideLayers);
       return;
     }
   } catch (err) {
     console.error('Error fetching saved ride route:', err);
   }
 
-  L.polyline([
+  const fallbackRouteLayer = L.polyline([
     [ride.pickup.lat, ride.pickup.lng],
     [ride.dropoff.lat, ride.dropoff.lng]
   ], { color: '#7c3aed', weight: 2, dashArray: '5, 10' }).addTo(map);
+  rideLayers.push(fallbackRouteLayer);
+  rideLayersById.set(ride._id, rideLayers);
 }
 requestBtn.addEventListener('click', async function () {
   if (!pickupMarker || !dropoffMarker) return;
