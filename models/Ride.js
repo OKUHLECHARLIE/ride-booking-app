@@ -14,6 +14,16 @@ const rideSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  distanceKm: {
+    type: Number,
+    required: true,
+    default: 0
+  },
+  price: {
+    type: Number,
+    required: true,
+    default: 0
+  },
   status: {
     type: String,
     enum: ['pending', 'accepted', 'completed'],

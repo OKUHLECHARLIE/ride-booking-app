@@ -75,6 +75,48 @@ async function fetchJson(url, headers = {}) {
   });
 }
 
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+  const earthRadiusKm = 6371;
+  const lat1Rad = lat1 * (Math.PI / 180);
+  const lat2Rad = lat2 * (Math.PI / 180);
+  const deltaLat = (lat2 - lat1) * (Math.PI / 180);
+  const deltaLng = (lng2 - lng1) * (Math.PI / 180);
+
+  const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(lat1Rad) * Math.cos(lat2Rad) *
+    Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
+async function calculateRouteMetrics(pickupLat, pickupLng, dropoffLat, dropoffLng) {
+  const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${encodeURIComponent(pickupLng)},${encodeURIComponent(pickupLat)};${encodeURIComponent(dropoffLng)},${encodeURIComponent(dropoffLat)}?overview=full&geometries=geojson`;
+
+  try {
+    const routeData = await fetchJson(osrmUrl);
+    const route = routeData?.routes?.[0];
+
+    if (route && typeof route.distance === 'number') {
+      const distanceKm = Number((route.distance / 1000).toFixed(1));
+      return {
+        distanceKm,
+        price: Number((distanceKm * 7).toFixed(2)),
+        route: route.geometry?.coordinates || null
+      };
+    }
+  } catch (err) {
+    console.error('OSRM route error:', err);
+  }
+
+  const distanceKm = Number(haversineDistanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng).toFixed(1));
+  return {
+    distanceKm,
+    price: Number((distanceKm * 7).toFixed(2)),
+    route: null
+  };
+}
+
 app.get('/api/geocode', async (req, res) => {
   const lat = parseFloat(req.query.lat);
   const lng = parseFloat(req.query.lng);
@@ -125,6 +167,29 @@ app.get('/api/geocode', async (req, res) => {
   } catch (err) {
     console.error('Reverse geocode error:', err);
     res.json({ address: `${lat.toFixed(4)}, ${lng.toFixed(4)}` });
+  }
+});
+
+app.get('/api/route', async (req, res) => {
+  const pickupLat = parseFloat(req.query.pickupLat);
+  const pickupLng = parseFloat(req.query.pickupLng);
+  const dropoffLat = parseFloat(req.query.dropoffLat);
+  const dropoffLng = parseFloat(req.query.dropoffLng);
+
+  if ([pickupLat, pickupLng, dropoffLat, dropoffLng].some(value => Number.isNaN(value))) {
+    return res.status(400).json({ error: 'pickupLat, pickupLng, dropoffLat, and dropoffLng query parameters are required' });
+  }
+
+  try {
+    const metrics = await calculateRouteMetrics(pickupLat, pickupLng, dropoffLat, dropoffLng);
+    res.json({
+      route: metrics.route,
+      distanceKm: metrics.distanceKm,
+      price: metrics.price
+    });
+  } catch (err) {
+    console.error('Route calculation error:', err);
+    res.status(500).json({ error: 'Could not fetch route' });
   }
 });
 
@@ -208,10 +273,13 @@ app.post('/api/auth/logout', (req, res) => {
 app.post('/api/rides', requireAuth, requireRole('rider'), async (req, res) => {
   try {
     const { pickup, dropoff } = req.body;
+    const routeMetrics = await calculateRouteMetrics(pickup.lat, pickup.lng, dropoff.lat, dropoff.lng);
     const ride = new Ride({
       pickup,
       dropoff,
-      riderId: req.session.userId
+      riderId: req.session.userId,
+      distanceKm: routeMetrics.distanceKm,
+      price: routeMetrics.price
     });
     const savedRide = await ride.save();
     res.status(201).json(savedRide);

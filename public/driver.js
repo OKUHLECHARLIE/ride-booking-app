@@ -1,6 +1,16 @@
 const driverRides = document.getElementById('driver-rides');
+const addressCache = new Map();
+
+function getAddressCacheKey(lat, lng) {
+  return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+}
 
 async function fetchAddress(lat, lng) {
+  const cacheKey = getAddressCacheKey(lat, lng);
+  if (addressCache.has(cacheKey)) {
+    return addressCache.get(cacheKey);
+  }
+
   try {
     const response = await fetch(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, {
       credentials: 'include'
@@ -9,10 +19,14 @@ async function fetchAddress(lat, lng) {
       throw new Error('Geocode request failed');
     }
     const data = await response.json();
-    return data.address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    const address = data.address || `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`;
+    addressCache.set(cacheKey, address);
+    return address;
   } catch (err) {
     console.error('Error fetching address:', err);
-    return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    const fallback = `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`;
+    addressCache.set(cacheKey, fallback);
+    return fallback;
   }
 }
 
@@ -36,7 +50,9 @@ async function loadPendingRides() {
       card.innerHTML = `
         <div class="coords">
           <strong>Pickup:</strong> Loading address...<br>
-          <strong>Dropoff:</strong> Loading address...
+          <strong>Dropoff:</strong> Loading address...<br>
+          Distance: N/A<br>
+          Price: N/A
         </div>
         <span class="status ${ride.status}">${ride.status}</span>
         ${ride.status === 'pending' ? `<button class="accept-btn" onclick="updateRide('${ride._id}', 'accepted')">Accept</button>` : ''}
@@ -50,9 +66,14 @@ async function loadPendingRides() {
         fetchAddress(ride.dropoff.lat, ride.dropoff.lng)
       ]);
 
+      const distanceText = typeof ride.distanceKm === 'number' ? `${ride.distanceKm.toFixed(1)} km` : 'N/A';
+      const priceText = typeof ride.price === 'number' ? `R${ride.price.toFixed(2)}` : 'N/A';
+
       coordsDiv.innerHTML = `
         <strong>Pickup:</strong> ${pickupAddress}<br>
-        <strong>Dropoff:</strong> ${dropoffAddress}
+        <strong>Dropoff:</strong> ${dropoffAddress}<br>
+        Distance: ${distanceText}<br>
+        Price: ${priceText}
       `;
     });
 

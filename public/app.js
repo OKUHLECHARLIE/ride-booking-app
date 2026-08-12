@@ -11,6 +11,7 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 let pickupMarker = null;
 let dropoffMarker = null;
 let clickState = 'pickup';
+let currentRouteLine = null;
 
 // Cache DOM element references
 const instruction = document.getElementById('instruction');
@@ -58,6 +59,75 @@ async function geocodeRide(ride) {
   ride.pickup.address = pickupAddress;
   ride.dropoff.address = dropoffAddress;
   return ride;
+}
+
+async function fetchRouteData(pickupLat, pickupLng, dropoffLat, dropoffLng) {
+  const response = await fetch(`/api/route?pickupLat=${encodeURIComponent(pickupLat)}&pickupLng=${encodeURIComponent(pickupLng)}&dropoffLat=${encodeURIComponent(dropoffLat)}&dropoffLng=${encodeURIComponent(dropoffLng)}`, {
+    credentials: 'include'
+  });
+
+  if (!response.ok) {
+    throw new Error('Route request failed');
+  }
+
+  return response.json();
+}
+
+function clearCurrentRouteLine() {
+  if (currentRouteLine) {
+    map.removeLayer(currentRouteLine);
+    currentRouteLine = null;
+  }
+}
+
+function showRoutePreview(distanceKm, price) {
+  instruction.innerHTML = `Ready! Click "Request Ride" to submit.<br>Distance: ${distanceKm.toFixed(1)} km<br>Price: R${price.toFixed(2)}`;
+}
+
+async function drawRouteBetweenPoints(pickupLat, pickupLng, dropoffLat, dropoffLng, { showDistance = false } = {}) {
+  clearCurrentRouteLine();
+
+  if (showDistance) {
+    instruction.innerHTML = 'Ready! Click "Request Ride" to submit.<br>Calculating distance...';
+  }
+
+  try {
+    const routeData = await fetchRouteData(pickupLat, pickupLng, dropoffLat, dropoffLng);
+    const routeCoordinates = Array.isArray(routeData?.route) ? routeData.route.map(([lng, lat]) => [lat, lng]) : null;
+
+    if (routeCoordinates && routeCoordinates.length > 0) {
+      currentRouteLine = L.polyline(routeCoordinates, {
+        color: '#7c3aed',
+        weight: 4
+      }).addTo(map);
+
+      if (showDistance && typeof routeData.distanceKm === 'number' && typeof routeData.price === 'number') {
+        showRoutePreview(routeData.distanceKm, routeData.price);
+      }
+
+      return currentRouteLine;
+    }
+
+    throw new Error('No route geometry received');
+  } catch (err) {
+    console.error('Error fetching route:', err);
+    currentRouteLine = L.polyline([
+      [pickupLat, pickupLng],
+      [dropoffLat, dropoffLng]
+    ], {
+      color: '#7c3aed',
+      weight: 2,
+      dashArray: '5, 10'
+    }).addTo(map);
+
+    if (showDistance) {
+      const fallbackDistance = 0;
+      const fallbackPrice = 0;
+      showRoutePreview(fallbackDistance, fallbackPrice);
+    }
+
+    return currentRouteLine;
+  }
 }
 
 async function logout() {
@@ -129,13 +199,17 @@ map.on('click', function (e) {
       .then(address => {
         dropoffMarker.address = address;
         dropoffMarker.setPopupContent(`Dropoff: ${address}`).openPopup();
-        instruction.textContent = 'Ready! Click "Request Ride" to submit.';
+        const pickupLatLng = pickupMarker.getLatLng();
+        const dropoffLatLng = dropoffMarker.getLatLng();
+        return drawRouteBetweenPoints(pickupLatLng.lat, pickupLatLng.lng, dropoffLatLng.lat, dropoffLatLng.lng, { showDistance: true });
       })
       .catch(err => {
         const fallback = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
         dropoffMarker.address = fallback;
         dropoffMarker.setPopupContent(`Dropoff: ${fallback}`).openPopup();
-        instruction.textContent = 'Ready! Click "Request Ride" to submit.';
+        const pickupLatLng = pickupMarker.getLatLng();
+        const dropoffLatLng = dropoffMarker.getLatLng();
+        drawRouteBetweenPoints(pickupLatLng.lat, pickupLatLng.lng, dropoffLatLng.lat, dropoffLatLng.lng, { showDistance: true });
         console.error('Error fetching dropoff address:', err);
       });
   }
@@ -144,6 +218,7 @@ map.on('click', function (e) {
 function resetMarkers() {
   if (pickupMarker) map.removeLayer(pickupMarker);
   if (dropoffMarker) map.removeLayer(dropoffMarker);
+  clearCurrentRouteLine();
   pickupMarker = null;
   dropoffMarker = null;
   clickState = 'pickup';
@@ -156,16 +231,20 @@ resetBtn.addEventListener('click', resetMarkers);
 function addRideToList(ride) {
   const pickupLabel = formatLocationLabel(ride.pickup);
   const dropoffLabel = formatLocationLabel(ride.dropoff);
+  const distanceLabel = typeof ride.distanceKm === 'number' ? `${ride.distanceKm.toFixed(1)} km` : 'N/A';
+  const priceLabel = typeof ride.price === 'number' ? `R${ride.price.toFixed(2)}` : 'N/A';
 
   const li = document.createElement('li');
   li.innerHTML = `
     <span class="status ${ride.status}">${ride.status}</span>
     Pickup: ${pickupLabel}<br>
-    Dropoff: ${dropoffLabel}
+    Dropoff: ${dropoffLabel}<br>
+    Distance: ${distanceLabel}<br>
+    Price: ${priceLabel}
   `;
   ridesList.prepend(li);
 }
-function addRideToMap(ride) {
+async function addRideToMap(ride) {
   // Draw a teal circle at the pickup location
   L.circleMarker([ride.pickup.lat, ride.pickup.lng], {
     radius: 8,
@@ -182,7 +261,18 @@ function addRideToMap(ride) {
     fillOpacity: 0.7
   }).addTo(map).bindPopup('Dropoff (Ride ' + ride._id.slice(-4) + ')');
 
-  // Connect pickup and dropoff with a purple dashed line
+  try {
+    const routeData = await fetchRouteData(ride.pickup.lat, ride.pickup.lng, ride.dropoff.lat, ride.dropoff.lng);
+    const routeCoordinates = Array.isArray(routeData?.route) ? routeData.route.map(([lng, lat]) => [lat, lng]) : null;
+
+    if (routeCoordinates && routeCoordinates.length > 0) {
+      L.polyline(routeCoordinates, { color: '#7c3aed', weight: 4 }).addTo(map);
+      return;
+    }
+  } catch (err) {
+    console.error('Error fetching saved ride route:', err);
+  }
+
   L.polyline([
     [ride.pickup.lat, ride.pickup.lng],
     [ride.dropoff.lat, ride.dropoff.lng]
@@ -223,7 +313,7 @@ requestBtn.addEventListener('click', async function () {
       dropoff: { ...savedRide.dropoff, address: dropoffMarker?.address }
     };
     addRideToList(displayRide);
-    addRideToMap(savedRide);
+    await addRideToMap(savedRide);
     resetMarkers();
   } catch (err) {
     console.error('Error requesting ride:', err);
@@ -239,10 +329,10 @@ async function loadRides() {
     }
     const rides = await response.json();
     const geocodedRides = await Promise.all(rides.map(ride => geocodeRide(ride)));
-    geocodedRides.forEach(ride => {
+    for (const ride of geocodedRides) {
       addRideToList(ride);
-      addRideToMap(ride);
-    });
+      await addRideToMap(ride);
+    }
   } catch (err) {
     console.error('Error loading rides:', err);
   }
