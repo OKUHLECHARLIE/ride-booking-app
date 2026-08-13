@@ -90,6 +90,18 @@ function haversineDistanceKm(lat1, lng1, lat2, lng2) {
   return earthRadiusKm * c;
 }
 
+function formatAddressFromStructured(structuredAddress = {}, fallback) {
+  const rawStreet = structuredAddress.road || structuredAddress.pedestrian || structuredAddress.footway;
+  const houseNumber = structuredAddress.house_number;
+  // Prepend house number to street when available
+  let street = rawStreet ? (houseNumber ? `${houseNumber} ${rawStreet}` : rawStreet) : (houseNumber ? String(houseNumber) : '');
+  const suburb = structuredAddress.suburb || structuredAddress.neighbourhood;
+  const city = structuredAddress.city || structuredAddress.town || structuredAddress.village;
+  const parts = [street, suburb, city].filter(Boolean);
+  if (parts.length) return parts.join(', ');
+  return fallback || '';
+}
+
 async function calculateRouteMetrics(pickupLat, pickupLng, dropoffLat, dropoffLng) {
   const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${encodeURIComponent(pickupLng)},${encodeURIComponent(pickupLat)};${encodeURIComponent(dropoffLng)},${encodeURIComponent(dropoffLat)}?overview=full&geometries=geojson`;
 
@@ -152,11 +164,7 @@ app.get('/api/geocode', async (req, res) => {
 
     const fallbackAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
     const structuredAddress = apiResponse?.address || {};
-    const street = structuredAddress.road || structuredAddress.pedestrian || structuredAddress.footway;
-    const suburb = structuredAddress.suburb || structuredAddress.neighbourhood;
-    const city = structuredAddress.city || structuredAddress.town || structuredAddress.village;
-    const addressParts = [street, suburb, city].filter(Boolean);
-    const address = addressParts.length ? addressParts.join(', ') : fallbackAddress;
+    const address = formatAddressFromStructured(structuredAddress, apiResponse?.display_name || fallbackAddress);
 
     if (address && address !== fallbackAddress) {
       cacheData[cacheKey] = address;
@@ -199,19 +207,31 @@ app.get('/api/search', async (req, res) => {
   if (!query) {
     return res.json([]);
   }
+  const viewboxMinLng = req.query.viewboxMinLng;
+  const viewboxMinLat = req.query.viewboxMinLat;
+  const viewboxMaxLng = req.query.viewboxMaxLng;
+  const viewboxMaxLat = req.query.viewboxMaxLat;
 
-  const searchUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
+  let searchUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=5&addressdetails=1&countrycodes=za&q=${encodeURIComponent(query)}`;
+
+  if (viewboxMinLng && viewboxMinLat && viewboxMaxLng && viewboxMaxLat) {
+    // viewbox biases results toward the given bounding box; bounded=0 ensures it's only a bias, not a hard restriction
+    searchUrl += `&viewbox=${encodeURIComponent(viewboxMinLng)},${encodeURIComponent(viewboxMinLat)},${encodeURIComponent(viewboxMaxLng)},${encodeURIComponent(viewboxMaxLat)}&bounded=0`;
+  }
 
   try {
     const results = await fetchJson(searchUrl, {
       'User-Agent': 'RideBookingApp/1.0 (contact: charlieokuhle4@gmail.com)'
     });
 
-    const normalizedResults = (Array.isArray(results) ? results : []).map(result => ({
-      displayName: result?.display_name || `${result?.lat || 0}, ${result?.lon || 0}`,
-      lat: parseFloat(result?.lat),
-      lng: parseFloat(result?.lon)
-    })).filter(result => !Number.isNaN(result.lat) && !Number.isNaN(result.lng));
+    const normalizedResults = (Array.isArray(results) ? results : []).map(result => {
+      const display = formatAddressFromStructured(result?.address || {}, result?.display_name || `${result?.lat || 0}, ${result?.lon || 0}`);
+      return {
+        displayName: display || (result?.display_name || `${result?.lat || 0}, ${result?.lon || 0}`),
+        lat: parseFloat(result?.lat),
+        lng: parseFloat(result?.lon)
+      };
+    }).filter(result => !Number.isNaN(result.lat) && !Number.isNaN(result.lng));
 
     res.json(normalizedResults);
   } catch (err) {

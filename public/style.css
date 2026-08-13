@@ -22,6 +22,8 @@ body {
   color: #ffffff;
   overflow-y: auto;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 #sidebar h1 {
@@ -201,5 +203,71 @@ button {
 
 #map {
   flex: 1;
-  height: 100vh;
+  display: flex;
+  align-items: stretch;
+  background: #0f1226;
 }
+
+#map-canvas {
+  flex: 1;
+}
+
+#menu-view {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f1226;
+}
+
+
+#history-main .history-panel h2 {
+  color: #00d4aa;
+}
+
+
+#history-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1a2e;
+}
+
+.history-panel {
+  width: 720px;
+  max-width: 90%;
+}
+
+/* reverted menu-main centering and history heading color changes */
+
+.menu-buttons {
+  display: flex;
+  gap: 16px;
+  flex-direction: column;
+  height: 50%;
+  max-width: 900px;
+  width: 50%;
+}
+
+.card {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 18px;
+  border-radius: 10px;
+  color: #e6eef6;
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card svg { align-self: flex-start; }
+.card-title { font-weight: 700; font-size: 1.05rem; color: #00d4aa; }
+.card-desc { color: #bfc8d9; font-size: 0.9rem; }
+.card-link { color: #8fbfb3; font-weight: 600; margin-top: 8px; }
+
+.big-btn { padding: 18px; font-size: 1rem; }
+
+.back-btn { background: transparent; color: #e6eef6; border: 1px solid rgba(255,255,255,0.04); margin-bottom: 12px; padding: 8px 12px; border-radius:6px; }

@@ -1,11 +1,8 @@
-// Initialize the Leaflet map centered on Cape Town
-const map = L.map('map').setView([-33.9249, 18.4241], 13);
-
-// Add OpenStreetMap tiles as the base layer
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-}).addTo(map);
+// Map will be initialized when the user enters the Ride view
+let map = null;
+let mapInitialized = false;
+let greenIcon = null;
+let redIcon = null;
 
 // State variables for tracking markers
 let pickupMarker = null;
@@ -13,7 +10,7 @@ let dropoffMarker = null;
 let clickState = 'pickup';
 let currentRouteLine = null;
 
-// Cache DOM element references
+// Cache DOM element references (some of these exist only inside views)
 const instruction = document.getElementById('instruction');
 const rideControls = document.getElementById('ride-controls');
 const requestBtn = document.getElementById('request-btn');
@@ -26,20 +23,22 @@ const searchResults = document.getElementById('search-results');
 const rideLayersById = new Map();
 let searchTimeout = null;
 
-function removeRideFromMap(rideId) {
-  const layers = rideLayersById.get(rideId);
-  if (!layers) {
-    return;
-  }
+// Menu / view elements
+const menuView = document.getElementById('menu-view');
+const enterRideBtn = document.getElementById('enter-ride');
+const enterHistoryBtn = document.getElementById('enter-history');
+const rideView = document.getElementById('ride-view');
+const historyView = document.getElementById('history-view');
+const backFromRideBtn = document.getElementById('back-from-ride');
+const backFromHistoryBtn = document.getElementById('back-from-history');
+const historyList = document.getElementById('history-list');
 
-  layers.forEach(layer => {
-    if (layer && map.hasLayer(layer)) {
-      map.removeLayer(layer);
-    }
-  });
-
-  rideLayersById.delete(rideId);
+// Ensure the placeholder clearly indicates full addresses (including house numbers) are supported
+if (searchInput) {
+  searchInput.placeholder = 'Search an address, street, or suburb...';
 }
+
+// removeRideFromMap defined later with safer removal
 
 async function fetchAddress(lat, lng) {
   const response = await fetch(`/api/geocode?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, {
@@ -95,7 +94,9 @@ async function fetchRouteData(pickupLat, pickupLng, dropoffLat, dropoffLng) {
 
 function clearCurrentRouteLine() {
   if (currentRouteLine) {
-    map.removeLayer(currentRouteLine);
+    if (typeof currentRouteLine.remove === 'function') {
+      currentRouteLine.remove();
+    }
     currentRouteLine = null;
   }
 }
@@ -205,7 +206,10 @@ async function searchLocations(query) {
   }
 
   try {
-    const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}`, { credentials: 'include' });
+    // include current map bounds to bias results toward the visible area
+    const bounds = map.getBounds();
+    const viewboxParams = `&viewboxMinLng=${encodeURIComponent(bounds.getWest())}&viewboxMinLat=${encodeURIComponent(bounds.getSouth())}&viewboxMaxLng=${encodeURIComponent(bounds.getEast())}&viewboxMaxLat=${encodeURIComponent(bounds.getNorth())}`;
+    const response = await fetch(`/api/search?q=${encodeURIComponent(trimmedQuery)}${viewboxParams}`, { credentials: 'include' });
     if (!response.ok) {
       throw new Error('Search request failed');
     }
@@ -226,9 +230,7 @@ async function searchLocations(query) {
       const item = document.createElement('li');
       item.textContent = result.displayName;
       item.addEventListener('click', () => {
-        clearSearchResults();
-        searchInput.value = result.displayName;
-
+        // place the marker, then clear the search input and close the dropdown
         if (clickState === 'pickup') {
           setMarkerAtLocation({
             lat: Number(result.lat),
@@ -237,16 +239,18 @@ async function searchLocations(query) {
             icon: greenIcon,
             label: 'Pickup'
           });
-          return;
+        } else {
+          setMarkerAtLocation({
+            lat: Number(result.lat),
+            lng: Number(result.lng),
+            address: result.displayName,
+            icon: redIcon,
+            label: 'Dropoff'
+          });
         }
 
-        setMarkerAtLocation({
-          lat: Number(result.lat),
-          lng: Number(result.lng),
-          address: result.displayName,
-          icon: redIcon,
-          label: 'Dropoff'
-        });
+        searchInput.value = '';
+        clearSearchResults();
       });
       searchResults.appendChild(item);
     });
@@ -274,54 +278,47 @@ if (searchBtn) {
     searchLocations(searchInput.value);
   });
 }
-// Define a green icon for pickup markers
-const greenIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
+// Handle removal of existing layers safely (works even if map not initialized)
+function removeRideFromMap(rideId) {
+  const layers = rideLayersById.get(rideId);
+  if (!layers) return;
 
-// Define a red icon for dropoff markers
-const redIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-// Handle map clicks to place pickup and dropoff markers
-map.on('click', function (e) {
+  layers.forEach(layer => {
+    if (layer && typeof layer.remove === 'function') layer.remove();
+  });
+
+  rideLayersById.delete(rideId);
+}
+
+// Map click handler extracted so we can attach it during initialization
+function mapClickHandler(e) {
   clearSearchResults();
   if (clickState === 'pickup') {
     const pickupAddress = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
-    if (pickupMarker) map.removeLayer(pickupMarker);
+    if (pickupMarker && typeof pickupMarker.remove === 'function') pickupMarker.remove();
     pickupMarker = L.marker(e.latlng, { icon: greenIcon }).addTo(map).bindPopup('Pickup: Looking up address...').openPopup();
     clickState = 'dropoff';
-    instruction.textContent = 'Looking up address...';
+    if (instruction) instruction.textContent = 'Looking up address...';
 
     fetchAddress(e.latlng.lat, e.latlng.lng)
       .then(address => {
         pickupMarker.address = address;
         pickupMarker.setPopupContent(`Pickup: ${address}`).openPopup();
-        instruction.textContent = 'Now click to set your dropoff location';
+        if (instruction) instruction.textContent = 'Now click to set your dropoff location';
       })
       .catch(err => {
         pickupMarker.address = pickupAddress;
         pickupMarker.setPopupContent(`Pickup: ${pickupAddress}`).openPopup();
-        instruction.textContent = 'Now click to set your dropoff location';
+        if (instruction) instruction.textContent = 'Now click to set your dropoff location';
         console.error('Error fetching pickup address:', err);
       });
   } else if (clickState === 'dropoff') {
     const dropoffAddress = `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
-    if (dropoffMarker) map.removeLayer(dropoffMarker);
+    if (dropoffMarker && typeof dropoffMarker.remove === 'function') dropoffMarker.remove();
     dropoffMarker = L.marker(e.latlng, { icon: redIcon }).addTo(map).bindPopup('Dropoff: Looking up address...').openPopup();
     clickState = 'done';
-    instruction.textContent = 'Looking up address...';
-    rideControls.classList.remove('hidden');
+    if (instruction) instruction.textContent = 'Looking up address...';
+    if (rideControls) rideControls.classList.remove('hidden');
 
     fetchAddress(e.latlng.lat, e.latlng.lng)
       .then(address => {
@@ -340,24 +337,189 @@ map.on('click', function (e) {
         console.error('Error fetching dropoff address:', err);
       });
   }
-});
+}
+
 // Remove both markers and reset state
 function resetMarkers() {
-  if (pickupMarker) map.removeLayer(pickupMarker);
-  if (dropoffMarker) map.removeLayer(dropoffMarker);
+  if (pickupMarker && typeof pickupMarker.remove === 'function') pickupMarker.remove();
+  if (dropoffMarker && typeof dropoffMarker.remove === 'function') dropoffMarker.remove();
   clearCurrentRouteLine();
   clearSearchResults();
-  if (searchInput) {
-    searchInput.value = '';
-  }
+  if (searchInput) searchInput.value = '';
   pickupMarker = null;
   dropoffMarker = null;
   clickState = 'pickup';
-  instruction.textContent = 'Click the map to set your pickup location';
-  rideControls.classList.add('hidden');
+  if (instruction) instruction.textContent = 'Click the map to set your pickup location';
+  if (rideControls) rideControls.classList.add('hidden');
 }
 
-resetBtn.addEventListener('click', resetMarkers);
+// Initialize the map and attach ride-view specific handlers. Called when entering Ride view.
+function initRideView() {
+  if (mapInitialized) return;
+
+  // create the map inside the ride view (map-canvas is the actual container)
+  map = L.map('map-canvas').setView([-33.9249, 18.4241], 13);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(map);
+
+  // icons
+  greenIcon = L.icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+  });
+
+  redIcon = L.icon({
+    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+  });
+
+  // attach map click handler
+  map.on('click', mapClickHandler);
+
+  // attach search listeners (debounced)
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        searchLocations(searchInput.value);
+      }, 400);
+    });
+  }
+
+  if (searchBtn) {
+    searchBtn.addEventListener('click', () => {
+      searchLocations(searchInput.value);
+    });
+  }
+
+  // attach reset and request handlers
+  if (resetBtn) resetBtn.addEventListener('click', resetMarkers);
+
+  if (requestBtn) {
+    requestBtn.addEventListener('click', async function () {
+      if (!pickupMarker || !dropoffMarker) return;
+
+      // Build the ride data from marker positions
+      const rideData = {
+        pickup: {
+          lat: pickupMarker.getLatLng().lat,
+          lng: pickupMarker.getLatLng().lng
+        },
+        dropoff: {
+          lat: dropoffMarker.getLatLng().lat,
+          lng: dropoffMarker.getLatLng().lng
+        }
+      };
+
+      // Send the ride to the server
+      try {
+        const response = await fetch('/api/rides', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(rideData)
+        });
+
+        if (response.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+        const savedRide = await response.json();
+        const displayRide = {
+          ...savedRide,
+          pickup: { ...savedRide.pickup, address: pickupMarker?.address },
+          dropoff: { ...savedRide.dropoff, address: dropoffMarker?.address }
+        };
+        addRideToList(displayRide);
+        if (mapInitialized) await addRideToMap(savedRide);
+        resetMarkers();
+      } catch (err) {
+        console.error('Error requesting ride:', err);
+      }
+    });
+  }
+
+  mapInitialized = true;
+
+  // load active rides into the map and list
+  loadActiveRides();
+}
+
+// Show/hide views
+function showMenuView() {
+  if (menuView) menuView.style.display = 'flex';
+  if (rideView) rideView.style.display = 'none';
+  if (historyView) historyView.style.display = 'none';
+  // hide main-area panels
+  const mapCanvas = document.getElementById('map-canvas');
+  const historyMain = document.getElementById('history-main');
+  if (mapCanvas) mapCanvas.style.display = 'none';
+  if (historyMain) historyMain.style.display = 'none';
+  // ensure sidebar menu is visible
+  if (menuView) menuView.style.display = 'flex';
+}
+
+function showRideView() {
+  if (menuView) menuView.style.display = 'none';
+  if (rideView) rideView.style.display = 'block';
+  if (historyView) historyView.style.display = 'none';
+  // show map canvas and hide history main BEFORE initializing the map
+  const mapCanvas = document.getElementById('map-canvas');
+  const historyMain = document.getElementById('history-main');
+  if (mapCanvas) mapCanvas.style.display = 'block';
+  if (historyMain) historyMain.style.display = 'none';
+  // hide sidebar menu when entering ride view
+  if (menuView) menuView.style.display = 'none';
+
+  // initialize map and handlers lazily
+  if (!mapInitialized) initRideView();
+  // Leaflet needs invalidateSize when container becomes visible (call every time)
+  if (map && typeof map.invalidateSize === 'function') {
+    setTimeout(() => map.invalidateSize(), 100);
+  }
+  // refresh active rides whenever entering the ride view
+  loadActiveRides();
+}
+
+function showHistoryView() {
+  if (menuView) menuView.style.display = 'none';
+  if (rideView) rideView.style.display = 'none';
+  if (historyView) historyView.style.display = 'block';
+  // show history in main area and hide map
+  const mapCanvas = document.getElementById('map-canvas');
+  const historyMain = document.getElementById('history-main');
+  if (mapCanvas) mapCanvas.style.display = 'none';
+  if (historyMain) historyMain.style.display = 'flex';
+  // hide sidebar menu when entering history view
+  if (menuView) menuView.style.display = 'none';
+  loadHistory();
+}
+
+// Wire menu and back buttons (verify elements exist before attaching)
+if (enterRideBtn) enterRideBtn.addEventListener('click', showRideView);
+if (enterHistoryBtn) enterHistoryBtn.addEventListener('click', showHistoryView);
+if (backFromRideBtn) backFromRideBtn.addEventListener('click', showMenuView);
+if (backFromHistoryBtn) backFromHistoryBtn.addEventListener('click', showMenuView);
+
+// Explicit initial visibility state on page load: menu visible, others hidden
+if (menuView) menuView.style.display = 'flex';
+if (rideView) rideView.style.display = 'none';
+if (historyView) historyView.style.display = 'none';
+// hide main panels initially
+const _mapCanvasInit = document.getElementById('map-canvas');
+const _historyMainInit = document.getElementById('history-main');
+if (_mapCanvasInit) _mapCanvasInit.style.display = 'none';
+if (_historyMainInit) _historyMainInit.style.display = 'none';
 
 function addRideToList(ride) {
   const pickupLabel = formatLocationLabel(ride.pickup);
@@ -412,6 +574,59 @@ function addRideToList(ride) {
 
   ridesList.prepend(li);
 }
+
+function addRideToHistory(ride) {
+  const pickupLabel = formatLocationLabel(ride.pickup);
+  const dropoffLabel = formatLocationLabel(ride.dropoff);
+  const distanceLabel = typeof ride.distanceKm === 'number' ? `${ride.distanceKm.toFixed(1)} km` : 'N/A';
+  const priceLabel = typeof ride.price === 'number' ? `R${ride.price.toFixed(2)}` : 'N/A';
+
+  const li = document.createElement('li');
+  li.innerHTML = `
+    <span class="status ${ride.status}">${ride.status}</span>
+    Pickup: ${pickupLabel}<br>
+    Dropoff: ${dropoffLabel}<br>
+    Distance: ${distanceLabel}<br>
+    Price: ${priceLabel}
+  `;
+
+  // Allow deleting completed rides from history (same behavior as before)
+  if (ride.status === 'completed') {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', async () => {
+      const shouldDelete = window.confirm('Delete this completed ride?');
+      if (!shouldDelete) return;
+
+      try {
+        const response = await fetch(`/api/rides/${ride._id}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+
+        if (response.status === 401) {
+          window.location.href = '/login.html';
+          return;
+        }
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Could not delete ride');
+        }
+
+        li.remove();
+        removeRideFromMap(ride._id);
+      } catch (err) {
+        console.error('Error deleting ride from history:', err);
+      }
+    });
+    li.appendChild(deleteBtn);
+  }
+
+  historyList.prepend(li);
+}
 async function addRideToMap(ride) {
   removeRideFromMap(ride._id);
 
@@ -454,49 +669,8 @@ async function addRideToMap(ride) {
   rideLayers.push(fallbackRouteLayer);
   rideLayersById.set(ride._id, rideLayers);
 }
-requestBtn.addEventListener('click', async function () {
-  if (!pickupMarker || !dropoffMarker) return;
-
-  // Build the ride data from marker positions
-  const rideData = {
-    pickup: {
-      lat: pickupMarker.getLatLng().lat,
-      lng: pickupMarker.getLatLng().lng
-    },
-    dropoff: {
-      lat: dropoffMarker.getLatLng().lat,
-      lng: dropoffMarker.getLatLng().lng
-    }
-  };
-
-  // Send the ride to the server
-  try {
-    const response = await fetch('/api/rides', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(rideData)
-    });
-
-    if (response.status === 401) {
-      window.location.href = '/login.html';
-      return;
-    }
-    const savedRide = await response.json();
-    const displayRide = {
-      ...savedRide,
-      pickup: { ...savedRide.pickup, address: pickupMarker?.address },
-      dropoff: { ...savedRide.dropoff, address: dropoffMarker?.address }
-    };
-    addRideToList(displayRide);
-    await addRideToMap(savedRide);
-    resetMarkers();
-  } catch (err) {
-    console.error('Error requesting ride:', err);
-  }
-});
-// Fetch all rides from the database and display them
-async function loadRides() {
+// Fetch active (non-completed) rides and show them in the Ride view/map
+async function loadActiveRides() {
   try {
     const response = await fetch('/api/rides', { credentials: 'include' });
     if (response.status === 401) {
@@ -505,14 +679,40 @@ async function loadRides() {
     }
     const rides = await response.json();
     const geocodedRides = await Promise.all(rides.map(ride => geocodeRide(ride)));
+
+    // Clear existing active list
+    if (ridesList) ridesList.innerHTML = '';
+
     for (const ride of geocodedRides) {
-      addRideToList(ride);
-      await addRideToMap(ride);
+      if (ride.status !== 'completed') {
+        addRideToList(ride);
+        if (mapInitialized) await addRideToMap(ride);
+      }
     }
   } catch (err) {
-    console.error('Error loading rides:', err);
+    console.error('Error loading active rides:', err);
   }
 }
 
-// Load rides as soon as the page opens
-loadRides();
+// Fetch completed rides and show them in History view
+async function loadHistory() {
+  try {
+    const response = await fetch('/api/rides', { credentials: 'include' });
+    if (response.status === 401) {
+      window.location.href = '/login.html';
+      return;
+    }
+    const rides = await response.json();
+    const geocodedRides = await Promise.all(rides.map(ride => geocodeRide(ride)));
+
+    if (historyList) historyList.innerHTML = '';
+
+    for (const ride of geocodedRides) {
+      if (ride.status === 'completed') {
+        addRideToHistory(ride);
+      }
+    }
+  } catch (err) {
+    console.error('Error loading history rides:', err);
+  }
+}
