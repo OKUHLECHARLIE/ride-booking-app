@@ -14,12 +14,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(session({
-  secret: 'ride-booking-session-secret',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: false,
+    secure: true,
     maxAge: 1000 * 60 * 60 * 24
   }
 }));
@@ -240,7 +240,7 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-const MONGODB_URI = 'mongodb+srv://OkuhleCharlie:Lukhanyo@ridecluster.zgmjizs.mongodb.net/?retryWrites=true&w=majority&appName=RideCluster';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB Atlas'))
