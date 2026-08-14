@@ -14,12 +14,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(session({
-  secret: process.env.SESSION_SECRET,
+  secret: 'ride-booking-session-secret',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
     maxAge: 1000 * 60 * 60 * 24
   }
 }));
