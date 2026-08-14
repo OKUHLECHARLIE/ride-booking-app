@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const session = require('express-session');
+const {MongoStore} = require('connect-mongo');
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const https = require('https');
@@ -11,12 +12,18 @@ const Ride = require('./models/Ride');
 const User = require('./models/User');
 
 const app = express();
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 app.use(cors());
 app.use(express.json());
 app.use(session({
   secret: 'ride-booking-session-secret',
   resave: false,
   saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI
+  }),
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
